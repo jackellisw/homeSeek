@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { HashRouter, Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import {
   ArrowRight,
@@ -19,8 +19,9 @@ import {
   Tv,
 } from "lucide-react";
 import { AUTH_STORAGE_KEY } from "@/lib/auth";
-import { defaultAppLinks, type AppLink } from "@/lib/apps";
+import { defaultAppLinks, hydrateAppLinks, type AppLink } from "@/lib/apps";
 import type { MediaItem } from "@/lib/plex";
+import type { StoredAppLink } from "@/lib/link-data";
 
 type AuthState = {
   authenticated: boolean;
@@ -40,41 +41,79 @@ function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function useLocalAppLinks() {
-  const [links, setLinks] = useState<AppLink[]>(() => {
-    if (typeof window === "undefined") {
-      return defaultAppLinks;
-    }
+function useAppLinks() {
+  const [links, setLinks] = useState<AppLink[]>(defaultAppLinks);
+  const [isLoadingLinks, setIsLoadingLinks] = useState(true);
+  const [linkError, setLinkError] = useState("");
+  const [savingIds, setSavingIds] = useState<string[]>([]);
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-    const stored = window.localStorage.getItem("homeSeek.links");
-    if (!stored) {
-      return defaultAppLinks;
-    }
+  useEffect(() => {
+    let active = true;
+    const timers = saveTimers.current;
 
-    try {
-      const overrides = JSON.parse(stored) as Array<Pick<AppLink, "id" | "href">>;
-      return defaultAppLinks.map((link) => ({
-        ...link,
-        href: overrides.find((item) => item.id === link.id)?.href || link.href,
-      }));
-    } catch {
-      window.localStorage.removeItem("homeSeek.links");
-      return defaultAppLinks;
-    }
-  });
+    fetch("/api/links")
+      .then((response) => (response.ok ? (response.json() as Promise<{ links: StoredAppLink[] }>) : null))
+      .then((body) => {
+        if (active && body) {
+          setLinks(hydrateAppLinks(body.links));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setLinkError("Could not load saved links.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingLinks(false);
+        }
+      });
 
-  function updateLink(id: string, href: string) {
-    setLinks((current) => {
-      const next = current.map((link) => (link.id === id ? { ...link, href } : link));
-      window.localStorage.setItem(
-        "homeSeek.links",
-        JSON.stringify(next.map((link) => ({ id: link.id, href: link.href }))),
-      );
-      return next;
+    return () => {
+      active = false;
+      Object.values(timers).forEach(clearTimeout);
+    };
+  }, []);
+
+  function setSaving(id: string, saving: boolean) {
+    setSavingIds((current) => {
+      if (saving) {
+        return current.includes(id) ? current : [...current, id];
+      }
+      return current.filter((savingId) => savingId !== id);
     });
   }
 
-  return { links, updateLink };
+  function updateLink(id: string, href: string) {
+    setLinks((current) => {
+      return current.map((link) => (link.id === id ? { ...link, href } : link));
+    });
+
+    setLinkError("");
+    setSaving(id, true);
+    clearTimeout(saveTimers.current[id]);
+    saveTimers.current[id] = setTimeout(() => {
+      fetch(`/api/links/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ href }),
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error("Could not save link.");
+          }
+        })
+        .catch(() => {
+          setLinkError("Could not save one of the links.");
+        })
+        .finally(() => {
+          setSaving(id, false);
+        });
+    }, 350);
+  }
+
+  return { isLoadingLinks, linkError, links, savingIds, updateLink };
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
@@ -248,7 +287,7 @@ function AppChrome({ children }: { children: React.ReactNode }) {
 }
 
 function DashboardPage() {
-  const { links } = useLocalAppLinks();
+  const { isLoadingLinks, linkError, links } = useAppLinks();
   const [media, setMedia] = useState<MediaResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -321,6 +360,9 @@ function DashboardPage() {
                 </div>
               ))}
             </div>
+            {isLoadingLinks || linkError ? (
+              <p className="mt-4 text-sm text-zinc-500">{isLoadingLinks ? "Loading saved links..." : linkError}</p>
+            ) : null}
           </div>
 
           <div className="rounded-lg border border-white/10 bg-zinc-950/54 p-5 backdrop-blur-xl">
@@ -429,15 +471,21 @@ function MediaRail({
 }
 
 function SettingsPage() {
-  const { links, updateLink } = useLocalAppLinks();
+  const { isLoadingLinks, linkError, links, savingIds, updateLink } = useAppLinks();
 
   return (
     <AppChrome>
       <main className="rounded-lg border border-white/10 bg-zinc-950/54 p-5 backdrop-blur-xl">
         <div className="mb-6">
           <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-          <p className="mt-1 text-sm text-zinc-500">Service URLs are stored in localStorage for this browser.</p>
+          <p className="mt-1 text-sm text-zinc-500">Service URLs are saved to SQLite and shared across browsers.</p>
         </div>
+
+        {isLoadingLinks || linkError ? (
+          <div className="mb-4 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-400">
+            {isLoadingLinks ? "Loading saved links..." : linkError}
+          </div>
+        ) : null}
 
         <div className="grid gap-3">
           {links.map((link) => (
@@ -453,6 +501,7 @@ function SettingsPage() {
                 onChange={(event) => updateLink(link.id, event.target.value)}
                 className="h-10 rounded-md border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition focus:border-sky-400/60"
               />
+              {savingIds.includes(link.id) ? <span className="text-xs text-zinc-500 md:col-start-2">Saving...</span> : null}
             </label>
           ))}
         </div>

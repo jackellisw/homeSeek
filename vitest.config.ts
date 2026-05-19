@@ -9,6 +9,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    exclude: ["**/.next/**", "**/node_modules/**", "**/dist/**"],
     globals: true,
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
 });
