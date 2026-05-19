@@ -16,7 +16,7 @@ RUN pnpm build
 FROM base AS runner
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
-ENV PORT=3000
+ENV PORT=4000
 ENV SQLITE_PATH=/data/homeseek.sqlite
 
 RUN groupadd --system --gid 1001 nodejs \
@@ -29,6 +29,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
-EXPOSE 3000
+EXPOSE 4000
 
 CMD ["node", "server.js"]
