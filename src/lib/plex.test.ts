@@ -28,4 +28,29 @@ describe("parseRecentlyAdded", () => {
       rating: "TV-14",
     });
   });
+
+  it("treats Plex show and season directories as TV items", () => {
+    const xml = `
+      <MediaContainer>
+        <Directory type="show" ratingKey="10" title="Foundation" year="2021" addedAt="1716224400" thumb="/library/metadata/10/thumb" leafCount="20" />
+        <Directory type="season" ratingKey="11" title="Season 2" parentTitle="Slow Horses" index="2" addedAt="1716234400" parentThumb="/library/metadata/11/thumb" leafCount="6" />
+      </MediaContainer>
+    `;
+
+    const result = parseRecentlyAdded(xml);
+
+    expect(result.movies).toHaveLength(0);
+    expect(result.shows).toHaveLength(2);
+    expect(result.shows[0]).toMatchObject({
+      id: "11",
+      title: "Slow Horses",
+      subtitle: "Season 2 - 6 episodes",
+      posterUrl: "/api/plex/image?path=%2Flibrary%2Fmetadata%2F11%2Fthumb",
+    });
+    expect(result.shows[1]).toMatchObject({
+      id: "10",
+      title: "Foundation",
+      subtitle: "20 episodes",
+    });
+  });
 });

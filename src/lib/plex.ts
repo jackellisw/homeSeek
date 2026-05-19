@@ -18,6 +18,7 @@ type PlexVideoNode = {
   ratingKey?: string | number;
   type?: string;
   title?: string;
+  grandparentRatingKey?: string | number;
   grandparentTitle?: string;
   parentTitle?: string;
   index?: string | number;
@@ -28,6 +29,23 @@ type PlexVideoNode = {
   thumb?: string;
   grandparentThumb?: string;
   contentRating?: string;
+};
+
+type PlexDirectoryNode = {
+  ratingKey?: string | number;
+  type?: string;
+  title?: string;
+  grandparentTitle?: string;
+  parentTitle?: string;
+  index?: string | number;
+  parentIndex?: string | number;
+  addedAt?: string | number;
+  year?: string | number;
+  thumb?: string;
+  parentThumb?: string;
+  art?: string;
+  leafCount?: string | number;
+  viewedLeafCount?: string | number;
 };
 
 function asArray<T>(value: T | T[] | undefined): T[] {
@@ -59,6 +77,24 @@ function formatEpisodeSubtitle(video: PlexVideoNode) {
   return [prefix, video.title].filter(Boolean).join(" - ");
 }
 
+function formatDirectorySubtitle(directory: PlexDirectoryNode) {
+  if (directory.type === "season") {
+    const season = Number(directory.index);
+    const seasonLabel = Number.isFinite(season) ? `Season ${season}` : directory.title;
+    const episodeCount = Number(directory.leafCount);
+    const episodeLabel = Number.isFinite(episodeCount) ? `${episodeCount} episode${episodeCount === 1 ? "" : "s"}` : undefined;
+
+    return [seasonLabel, episodeLabel].filter(Boolean).join(" - ");
+  }
+
+  const episodeCount = Number(directory.leafCount);
+  if (Number.isFinite(episodeCount)) {
+    return `${episodeCount} episode${episodeCount === 1 ? "" : "s"}`;
+  }
+
+  return "Recently added show";
+}
+
 function posterUrl(path?: string) {
   if (!path) {
     return "";
@@ -72,10 +108,16 @@ export function parseRecentlyAdded(xml: string) {
     attributeNamePrefix: "",
     ignoreAttributes: false,
   });
-  const parsed = parser.parse(xml) as { MediaContainer?: { Video?: PlexVideoNode | PlexVideoNode[] } };
+  const parsed = parser.parse(xml) as {
+    MediaContainer?: {
+      Directory?: PlexDirectoryNode | PlexDirectoryNode[];
+      Video?: PlexVideoNode | PlexVideoNode[];
+    };
+  };
+  const directories = asArray(parsed.MediaContainer?.Directory);
   const videos = asArray(parsed.MediaContainer?.Video);
 
-  const mapped = videos
+  const mappedVideos = videos
     .filter((video) => video.type === "movie" || video.type === "episode")
     .map<MediaItem>((video) => {
       const type = video.type as MediaType;
@@ -94,13 +136,50 @@ export function parseRecentlyAdded(xml: string) {
         posterUrl: posterUrl(type === "episode" ? video.grandparentThumb || video.thumb : video.thumb),
         rating: video.contentRating,
       };
-    })
-    .sort((a, b) => Date.parse(b.addedAt) - Date.parse(a.addedAt));
+    });
+
+  const mappedDirectories = directories
+    .filter((directory) => directory.type === "show" || directory.type === "season")
+    .map<MediaItem>((directory) => {
+      const title =
+        directory.type === "season"
+          ? directory.parentTitle || directory.grandparentTitle || directory.title || "Unknown show"
+          : directory.title || "Unknown show";
+      const subtitle = formatDirectorySubtitle(directory);
+      const addedAt = Number(directory.addedAt);
+
+      return {
+        id: String(directory.ratingKey || `show-${title}-${subtitle}`),
+        type: "episode",
+        title,
+        subtitle,
+        addedAt: Number.isFinite(addedAt) ? new Date(addedAt * 1000).toISOString() : new Date().toISOString(),
+        year: directory.year ? Number(directory.year) : undefined,
+        posterUrl: posterUrl(directory.parentThumb || directory.thumb || directory.art),
+      };
+    });
+
+  const mapped = [...mappedVideos, ...mappedDirectories].sort((a, b) => Date.parse(b.addedAt) - Date.parse(a.addedAt));
 
   return {
     movies: mapped.filter((item) => item.type === "movie").slice(0, 8),
     shows: mapped.filter((item) => item.type === "episode").slice(0, 8),
   };
+}
+
+async function fetchRecentlyAddedXml(baseUrl: string, token: string, type?: "1" | "4") {
+  const url = new URL("/library/recentlyAdded", baseUrl);
+  url.searchParams.set("X-Plex-Token", token);
+  if (type) {
+    url.searchParams.set("type", type);
+  }
+
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Plex responded with ${response.status}.`);
+  }
+
+  return response.text();
 }
 
 export async function fetchRecentlyAddedFromPlex() {
@@ -111,13 +190,22 @@ export async function fetchRecentlyAddedFromPlex() {
     throw new Error("Plex is not configured. Set PLEX_BASE_URL and PLEX_TOKEN.");
   }
 
-  const url = new URL("/library/recentlyAdded", baseUrl);
-  url.searchParams.set("X-Plex-Token", token);
+  const [mixedResult, movieResult, episodeResult] = await Promise.allSettled([
+    fetchRecentlyAddedXml(baseUrl, token),
+    fetchRecentlyAddedXml(baseUrl, token, "1"),
+    fetchRecentlyAddedXml(baseUrl, token, "4"),
+  ]);
 
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`Plex responded with ${response.status}.`);
+  if (mixedResult.status === "rejected" && movieResult.status === "rejected" && episodeResult.status === "rejected") {
+    throw mixedResult.reason instanceof Error ? mixedResult.reason : new Error("Plex could not be reached.");
   }
 
-  return parseRecentlyAdded(await response.text());
+  const mixed = mixedResult.status === "fulfilled" ? parseRecentlyAdded(mixedResult.value) : { movies: [], shows: [] };
+  const movies = movieResult.status === "fulfilled" ? parseRecentlyAdded(movieResult.value).movies : [];
+  const shows = episodeResult.status === "fulfilled" ? parseRecentlyAdded(episodeResult.value).shows : [];
+
+  return {
+    movies: movies.length > 0 ? movies : mixed.movies,
+    shows: shows.length > 0 ? shows : mixed.shows,
+  };
 }
