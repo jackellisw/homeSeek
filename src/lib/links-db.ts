@@ -60,6 +60,11 @@ function getDatabase() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS deleted_links (
+      id TEXT PRIMARY KEY,
+      deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
   seedDefaultLinks(database);
   seedDefaultSettings(database);
@@ -70,7 +75,8 @@ function getDatabase() {
 function seedDefaultLinks(db: Database.Database) {
   const statement = db.prepare(`
     INSERT INTO links (id, name, description, href, category, accent, position)
-    VALUES (@id, @name, @description, @href, @category, @accent, @position)
+    SELECT @id, @name, @description, @href, @category, @accent, @position
+    WHERE NOT EXISTS (SELECT 1 FROM deleted_links WHERE id = @id)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       description = excluded.description,
@@ -138,6 +144,24 @@ export function updateStoredLinkHref(id: string, href: string) {
   }
 
   return getStoredLinks().find((link) => link.id === id);
+}
+
+export function deleteStoredLink(id: string) {
+  const db = getDatabase();
+  const existing = db.prepare("SELECT id FROM links WHERE id = ?").get(id) as { id: string } | undefined;
+
+  if (!existing) {
+    throw new Error("Unknown link.");
+  }
+
+  const transaction = db.transaction(() => {
+    db.prepare("INSERT OR IGNORE INTO deleted_links (id) VALUES (?)").run(id);
+    db.prepare("DELETE FROM links WHERE id = ?").run(id);
+  });
+
+  transaction();
+
+  return { id };
 }
 
 export function createStoredLink(input: CreateStoredLinkInput) {

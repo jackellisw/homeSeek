@@ -8,20 +8,25 @@ import {
   ChevronRight,
   ExternalLink,
   Film,
+  Globe,
   KeyRound,
+  Link as LinkIcon,
   LayoutDashboard,
   Loader2,
   LogOut,
+  Plus,
   RefreshCw,
+  Save,
   Settings,
   Shield,
   Sparkles,
+  Trash2,
   Tv,
 } from "lucide-react";
 import { AUTH_STORAGE_KEY } from "@/lib/auth";
 import { defaultAppLinks, hydrateAppLinks, type AppLink } from "@/lib/apps";
 import type { MediaItem } from "@/lib/plex";
-import type { StoredAppLink } from "@/lib/link-data";
+import { appCategories, type StoredAppLink } from "@/lib/link-data";
 
 type AuthState = {
   authenticated: boolean;
@@ -35,7 +40,12 @@ type MediaResponse = {
   message?: string;
 };
 
+type DashboardSettings = {
+  defaultBaseUrl: string;
+};
+
 const categoryOrder = ["Media", "Downloads", "Infra", "Observability"] as const;
+const DEFAULT_FORM_CATEGORY = "Media";
 
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -45,6 +55,7 @@ function useAppLinks() {
   const [links, setLinks] = useState<AppLink[]>(defaultAppLinks);
   const [isLoadingLinks, setIsLoadingLinks] = useState(true);
   const [linkError, setLinkError] = useState("");
+  const [deletingIds, setDeletingIds] = useState<string[]>([]);
   const [savingIds, setSavingIds] = useState<string[]>([]);
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -85,6 +96,33 @@ function useAppLinks() {
     });
   }
 
+  function setDeleting(id: string, deleting: boolean) {
+    setDeletingIds((current) => {
+      if (deleting) {
+        return current.includes(id) ? current : [...current, id];
+      }
+      return current.filter((deletingId) => deletingId !== id);
+    });
+  }
+
+  async function addLink(input: Pick<StoredAppLink, "category" | "description" | "href" | "name">) {
+    setLinkError("");
+    const response = await fetch("/api/links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { message?: string } | null;
+      throw new Error(body?.message || "Could not add link.");
+    }
+
+    const body = (await response.json()) as { link: StoredAppLink };
+    setLinks((current) => hydrateAppLinks([...current, body.link]));
+    return body.link;
+  }
+
   function updateLink(id: string, href: string) {
     setLinks((current) => {
       return current.map((link) => (link.id === id ? { ...link, href } : link));
@@ -113,7 +151,101 @@ function useAppLinks() {
     }, 350);
   }
 
-  return { isLoadingLinks, linkError, links, savingIds, updateLink };
+  async function deleteLink(id: string) {
+    const previousLinks = links;
+
+    clearTimeout(saveTimers.current[id]);
+    setLinkError("");
+    setDeleting(id, true);
+    setLinks((current) => current.filter((link) => link.id !== id));
+
+    try {
+      const response = await fetch(`/api/links/${id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(body?.message || "Could not delete link.");
+      }
+    } catch (error) {
+      setLinks(previousLinks);
+      setLinkError(error instanceof Error ? error.message : "Could not delete link.");
+    } finally {
+      setDeleting(id, false);
+    }
+  }
+
+  return { addLink, deleteLink, deletingIds, isLoadingLinks, linkError, links, savingIds, updateLink };
+}
+
+function useDashboardSettings() {
+  const [settings, setSettings] = useState<DashboardSettings>({ defaultBaseUrl: "http://localhost" });
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+  const [settingsError, setSettingsError] = useState("");
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/settings")
+      .then((response) => (response.ok ? (response.json() as Promise<{ settings: DashboardSettings }>) : null))
+      .then((body) => {
+        if (active && body) {
+          setSettings(body.settings);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSettingsError("Could not load dashboard settings.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingSettings(false);
+        }
+      });
+
+    return () => {
+      active = false;
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+      }
+    };
+  }, []);
+
+  function updateDefaultBaseUrl(defaultBaseUrl: string) {
+    setSettings((current) => ({ ...current, defaultBaseUrl }));
+    setSettingsError("");
+    setIsSavingSettings(true);
+
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+    }
+
+    saveTimer.current = setTimeout(() => {
+      fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultBaseUrl }),
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error("Could not save dashboard settings.");
+          }
+          return response.json() as Promise<{ settings: DashboardSettings }>;
+        })
+        .then((body) => {
+          setSettings(body.settings);
+        })
+        .catch(() => {
+          setSettingsError("Could not save dashboard settings.");
+        })
+        .finally(() => {
+          setIsSavingSettings(false);
+        });
+    }, 350);
+  }
+
+  return { isLoadingSettings, isSavingSettings, settings, settingsError, updateDefaultBaseUrl };
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
@@ -471,40 +603,244 @@ function MediaRail({
 }
 
 function SettingsPage() {
-  const { isLoadingLinks, linkError, links, savingIds, updateLink } = useAppLinks();
+  const { addLink, deleteLink, deletingIds, isLoadingLinks, linkError, links, savingIds, updateLink } = useAppLinks();
+  const { isLoadingSettings, isSavingSettings, settings, settingsError, updateDefaultBaseUrl } = useDashboardSettings();
+  const [addMode, setAddMode] = useState<"full" | "port">("port");
+  const [newLinkName, setNewLinkName] = useState("");
+  const [newLinkDescription, setNewLinkDescription] = useState("");
+  const [newLinkCategory, setNewLinkCategory] = useState<(typeof appCategories)[number]>(DEFAULT_FORM_CATEGORY);
+  const [newLinkUrl, setNewLinkUrl] = useState("");
+  const [newLinkPort, setNewLinkPort] = useState("");
+  const [addError, setAddError] = useState("");
+  const [isAddingLink, setIsAddingLink] = useState(false);
+
+  function urlFromPort() {
+    const base = settings.defaultBaseUrl.trim().replace(/\/+$/, "");
+    const port = newLinkPort.trim();
+
+    if (!port) {
+      return "";
+    }
+
+    return `${base}:${port}`;
+  }
+
+  async function submitNewLink(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsAddingLink(true);
+    setAddError("");
+
+    try {
+      await addLink({
+        category: newLinkCategory,
+        description: newLinkDescription,
+        href: addMode === "full" ? newLinkUrl : urlFromPort(),
+        name: newLinkName,
+      });
+      setNewLinkName("");
+      setNewLinkDescription("");
+      setNewLinkUrl("");
+      setNewLinkPort("");
+      setNewLinkCategory(DEFAULT_FORM_CATEGORY);
+      setAddMode("port");
+    } catch (error) {
+      setAddError(error instanceof Error ? error.message : "Could not add link.");
+    } finally {
+      setIsAddingLink(false);
+    }
+  }
 
   return (
     <AppChrome>
-      <main className="rounded-lg border border-white/10 bg-zinc-950/54 p-5 backdrop-blur-xl">
-        <div className="mb-6">
-          <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-          <p className="mt-1 text-sm text-zinc-500">Service URLs are saved to SQLite and shared across browsers.</p>
-        </div>
-
-        {isLoadingLinks || linkError ? (
-          <div className="mb-4 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-400">
-            {isLoadingLinks ? "Loading saved links..." : linkError}
+      <main className="grid gap-6">
+        <section className="rounded-lg border border-white/10 bg-zinc-950/54 p-5 backdrop-blur-xl">
+          <div className="mb-6">
+            <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+            <p className="mt-1 text-sm text-zinc-500">Service URLs are saved to SQLite and shared across browsers.</p>
           </div>
-        ) : null}
 
-        <div className="grid gap-3">
-          {links.map((link) => (
-            <label key={link.id} className="grid gap-2 rounded-md border border-white/10 bg-black/20 p-4 md:grid-cols-[12rem_1fr] md:items-center">
-              <span className="flex items-center gap-3 text-sm font-medium text-zinc-300">
-                <span className={classNames("grid h-8 w-8 place-items-center rounded bg-gradient-to-br", link.accent)}>
-                  <link.icon className="h-4 w-4 text-black/80" />
-                </span>
-                {link.name}
+          <div className="grid gap-3 md:grid-cols-[12rem_1fr_auto] md:items-center">
+            <label className="flex items-center gap-3 text-sm font-medium text-zinc-300" htmlFor="default-base-url">
+              <span className="grid h-8 w-8 place-items-center rounded bg-gradient-to-br from-sky-300 to-cyan-500">
+                <Globe className="h-4 w-4 text-black/80" />
               </span>
-              <input
-                value={link.href}
-                onChange={(event) => updateLink(link.id, event.target.value)}
-                className="h-10 rounded-md border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition focus:border-sky-400/60"
-              />
-              {savingIds.includes(link.id) ? <span className="text-xs text-zinc-500 md:col-start-2">Saving...</span> : null}
+              Default URL
             </label>
-          ))}
-        </div>
+            <input
+              id="default-base-url"
+              value={settings.defaultBaseUrl}
+              onChange={(event) => updateDefaultBaseUrl(event.target.value)}
+              className="h-10 rounded-md border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition focus:border-sky-400/60"
+              placeholder="http://192.168.1.20"
+            />
+            <span className="min-w-24 text-xs text-zinc-500">
+              {isLoadingSettings ? "Loading..." : isSavingSettings ? "Saving..." : "Saved"}
+            </span>
+          </div>
+          {settingsError ? <p className="mt-3 text-sm text-red-300">{settingsError}</p> : null}
+        </section>
+
+        <section className="rounded-lg border border-white/10 bg-zinc-950/54 p-5 backdrop-blur-xl">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-md border border-white/10 bg-black/20">
+              <Plus className="h-4 w-4 text-sky-300" />
+            </div>
+            <div>
+              <h2 className="font-medium">Add dashboard link</h2>
+              <p className="text-sm text-zinc-500">Use a full URL, or reuse the default URL and only provide a port.</p>
+            </div>
+          </div>
+
+          <form onSubmit={submitNewLink} className="grid gap-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-2 text-sm text-zinc-300">
+                Name
+                <input
+                  value={newLinkName}
+                  onChange={(event) => setNewLinkName(event.target.value)}
+                  className="h-10 rounded-md border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition focus:border-sky-400/60"
+                  placeholder="SABnzbd"
+                />
+              </label>
+              <label className="grid gap-2 text-sm text-zinc-300">
+                Category
+                <select
+                  value={newLinkCategory}
+                  onChange={(event) => setNewLinkCategory(event.target.value as (typeof appCategories)[number])}
+                  className="h-10 rounded-md border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition focus:border-sky-400/60"
+                >
+                  {appCategories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="grid gap-2 text-sm text-zinc-300">
+              Description
+              <input
+                value={newLinkDescription}
+                onChange={(event) => setNewLinkDescription(event.target.value)}
+                className="h-10 rounded-md border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition focus:border-sky-400/60"
+                placeholder="Download queue and history"
+              />
+            </label>
+
+            <div className="inline-grid w-fit grid-cols-2 rounded-md border border-white/10 bg-black/24 p-1 text-sm">
+              <button
+                type="button"
+                onClick={() => setAddMode("port")}
+                className={classNames(
+                  "inline-flex h-8 items-center gap-2 rounded px-3 text-zinc-400 transition hover:text-white",
+                  addMode === "port" && "bg-white/8 text-white",
+                )}
+              >
+                <Save className="h-4 w-4" />
+                Default + port
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddMode("full")}
+                className={classNames(
+                  "inline-flex h-8 items-center gap-2 rounded px-3 text-zinc-400 transition hover:text-white",
+                  addMode === "full" && "bg-white/8 text-white",
+                )}
+              >
+                <LinkIcon className="h-4 w-4" />
+                Full URL
+              </button>
+            </div>
+
+            {addMode === "port" ? (
+              <div className="grid gap-3 md:grid-cols-[1fr_10rem] md:items-end">
+                <label className="grid gap-2 text-sm text-zinc-300">
+                  Preview
+                  <input
+                    value={urlFromPort()}
+                    readOnly
+                    className="h-10 rounded-md border border-white/10 bg-black/20 px-3 text-sm text-zinc-400 outline-none"
+                  />
+                </label>
+                <label className="grid gap-2 text-sm text-zinc-300">
+                  Port
+                  <input
+                    value={newLinkPort}
+                    onChange={(event) => setNewLinkPort(event.target.value.replace(/[^0-9]/g, ""))}
+                    inputMode="numeric"
+                    className="h-10 rounded-md border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition focus:border-sky-400/60"
+                    placeholder="8080"
+                  />
+                </label>
+              </div>
+            ) : (
+              <label className="grid gap-2 text-sm text-zinc-300">
+                Full URL
+                <input
+                  value={newLinkUrl}
+                  onChange={(event) => setNewLinkUrl(event.target.value)}
+                  className="h-10 rounded-md border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition focus:border-sky-400/60"
+                  placeholder="http://192.168.1.20:8080"
+                />
+              </label>
+            )}
+
+            {addError ? <p className="text-sm text-red-300">{addError}</p> : null}
+
+            <button
+              type="submit"
+              disabled={isAddingLink}
+              className="inline-flex h-10 w-fit items-center gap-2 rounded-md bg-zinc-100 px-4 text-sm font-medium text-zinc-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isAddingLink ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Add link
+            </button>
+          </form>
+        </section>
+
+        <section className="rounded-lg border border-white/10 bg-zinc-950/54 p-5 backdrop-blur-xl">
+          <div className="mb-5">
+            <h2 className="font-medium">Existing links</h2>
+            <p className="mt-1 text-sm text-zinc-500">Changes save automatically.</p>
+          </div>
+
+          {isLoadingLinks || linkError ? (
+            <div className="mb-4 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-zinc-400">
+              {isLoadingLinks ? "Loading saved links..." : linkError}
+            </div>
+          ) : null}
+
+          <div className="grid gap-3">
+            {links.map((link) => (
+              <div key={link.id} className="grid gap-2 rounded-md border border-white/10 bg-black/20 p-4 md:grid-cols-[12rem_1fr_auto] md:items-center">
+                <span className="flex items-center gap-3 text-sm font-medium text-zinc-300">
+                  <span className={classNames("grid h-8 w-8 place-items-center rounded bg-gradient-to-br", link.accent)}>
+                    <link.icon className="h-4 w-4 text-black/80" />
+                  </span>
+                  {link.name}
+                </span>
+                <input
+                  value={link.href}
+                  onChange={(event) => updateLink(link.id, event.target.value)}
+                  className="h-10 rounded-md border border-white/10 bg-zinc-950 px-3 text-sm text-zinc-200 outline-none transition focus:border-sky-400/60"
+                />
+                <button
+                  type="button"
+                  onClick={() => void deleteLink(link.id)}
+                  disabled={deletingIds.includes(link.id)}
+                  aria-label={`Remove ${link.name}`}
+                  title={`Remove ${link.name}`}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-red-400/20 px-3 text-sm text-red-200 transition hover:border-red-300/40 hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {deletingIds.includes(link.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  <span className="md:hidden">Remove</span>
+                </button>
+                {savingIds.includes(link.id) ? <span className="text-xs text-zinc-500 md:col-start-2">Saving...</span> : null}
+              </div>
+            ))}
+          </div>
+        </section>
       </main>
     </AppChrome>
   );

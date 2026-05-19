@@ -2,7 +2,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getStoredLinks, resetLinksDatabaseForTests, updateStoredLinkHref } from "@/lib/links-db";
+import {
+  createStoredLink,
+  deleteStoredLink,
+  getDashboardSettings,
+  getStoredLinks,
+  resetLinksDatabaseForTests,
+  updateDashboardSettings,
+  updateStoredLinkHref,
+} from "@/lib/links-db";
 
 let tempDir = "";
 
@@ -34,5 +42,43 @@ describe("links database", () => {
       id: "plex",
       href: "https://plex.example.test",
     });
+  });
+
+  it("creates custom links and saves dashboard settings", () => {
+    updateDashboardSettings({ defaultBaseUrl: "192.168.1.50/" });
+
+    expect(getDashboardSettings()).toEqual({
+      defaultBaseUrl: "http://192.168.1.50",
+    });
+
+    const link = createStoredLink({
+      category: "Downloads",
+      description: "Download queue",
+      href: `${getDashboardSettings().defaultBaseUrl}:8080`,
+      name: "SABnzbd",
+    });
+
+    expect(link).toMatchObject({
+      category: "Downloads",
+      description: "Download queue",
+      href: "http://192.168.1.50:8080",
+      name: "SABnzbd",
+    });
+    expect(getStoredLinks().at(-1)).toMatchObject({
+      id: link.id,
+      href: "http://192.168.1.50:8080",
+    });
+  });
+
+  it("deletes links and does not reseed deleted defaults", () => {
+    expect(getStoredLinks().some((link) => link.id === "plex")).toBe(true);
+
+    deleteStoredLink("plex");
+
+    expect(getStoredLinks().some((link) => link.id === "plex")).toBe(false);
+
+    resetLinksDatabaseForTests();
+
+    expect(getStoredLinks().some((link) => link.id === "plex")).toBe(false);
   });
 });
