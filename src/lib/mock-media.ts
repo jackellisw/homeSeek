@@ -1,0 +1,73 @@
+import type { MediaItem } from "@/lib/plex";
+
+export const mockMovies: MediaItem[] = [
+  {
+    id: "mock-movie-1",
+    type: "movie",
+    title: "Arrival",
+    subtitle: "Recently scanned",
+    addedAt: "2026-05-18T19:42:00.000Z",
+    year: 2016,
+    duration: "1h 56m",
+    posterUrl: "",
+    rating: "PG-13",
+  },
+  {
+    id: "mock-movie-2",
+    type: "movie",
+    title: "Dune: Part Two",
+    subtitle: "4K HDR",
+    addedAt: "2026-05-17T21:10:00.000Z",
+    year: 2024,
+    duration: "2h 46m",
+    posterUrl: "",
+    rating: "PG-13",
+  },
+  {
+    id: "mock-movie-3",
+    type: "movie",
+    title: "The Social Network",
+    subtitle: "Library import",
+    addedAt: "2026-05-15T08:12:00.000Z",
+    year: 2010,
+    duration: "2h",
+    posterUrl: "",
+    rating: "PG-13",
+  },
+];
+
+export const mockShows: MediaItem[] = [
+  {
+    id: "mock-show-1",
+    type: "episode",
+    title: "Severance",
+    subtitle: "S02E04 - Woe's Hollow",
+    addedAt: "2026-05-18T22:05:00.000Z",
+    year: 2026,
+    duration: "51m",
+    posterUrl: "",
+    rating: "TV-MA",
+  },
+  {
+    id: "mock-show-2",
+    type: "episode",
+    title: "The Bear",
+    subtitle: "S03E07 - Legacy",
+    addedAt: "2026-05-16T12:30:00.000Z",
+    year: 2024,
+    duration: "36m",
+    posterUrl: "",
+    rating: "TV-MA",
+  },
+  {
+    id: "mock-show-3",
+    type: "episode",
+    title: "Silo",
+    subtitle: "S02E02 - Order",
+    addedAt: "2026-05-14T18:20:00.000Z",
+    year: 2025,
+    duration: "48m",
+    posterUrl: "",
+    rating: "TV-14",
+  },
+];
