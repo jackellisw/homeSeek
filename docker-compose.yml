@@ -10,6 +10,8 @@ services:
       PLEX_BASE_URL: "${PLEX_BASE_URL:-http://host.docker.internal:32400}"
       PLEX_TOKEN: "${PLEX_TOKEN:-}"
       SQLITE_PATH: "/data/homeseek.sqlite"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - homeseek-data:/data
     restart: unless-stopped

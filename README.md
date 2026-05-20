@@ -46,6 +46,18 @@ Open [http://localhost:3000](http://localhost:3000).
 
 When Plex is running on the Docker host, `PLEX_BASE_URL` can usually be `http://host.docker.internal:32400`. On Linux hosts that do not support `host.docker.internal`, set `PLEX_BASE_URL` to the host or bridge address your container can reach.
 
+## Homeserver Troubleshooting
+
+Open Settings and check **System diagnostics** first. It verifies whether SQLite can write to the configured database path and whether Plex is reachable from the HomeSeek server/container.
+
+Common fixes:
+
+- If Plex uses `http://localhost:32400` on the host, do not use that inside Docker. Use `http://host.docker.internal:32400` or the Plex server LAN IP, such as `http://192.168.1.20:32400`.
+- On Linux Docker hosts, `docker-compose.yml` maps `host.docker.internal` to `host-gateway`; keep that `extra_hosts` entry.
+- If SQLite is not writable, make sure `SQLITE_PATH=/data/homeseek.sqlite` in Docker and that `/data` is mounted as a writable volume.
+- If using a bind mount instead of the named volume, the mounted host directory must be writable by container user `1001`.
+- If environment changes do not apply, recreate the container with `docker compose up -d --build --force-recreate`.
+
 ## Scripts
 
 ```bash

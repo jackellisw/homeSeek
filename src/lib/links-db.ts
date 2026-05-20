@@ -35,6 +35,10 @@ function databasePath() {
   return isAbsolute(configuredPath) ? configuredPath : join(/*turbopackIgnore: true*/ process.cwd(), configuredPath);
 }
 
+export function getSqlitePath() {
+  return databasePath();
+}
+
 function getDatabase() {
   if (database) {
     return database;
@@ -133,6 +137,28 @@ function normalizeUrl(value: string) {
 
 export function getStoredLinks() {
   return getDatabase().prepare("SELECT id, name, description, href, category, accent, position FROM links ORDER BY position ASC").all() as LinkRow[];
+}
+
+export function runSqliteWriteCheck() {
+  const db = getDatabase();
+  const value = new Date().toISOString();
+
+  const transaction = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO settings (key, value)
+      VALUES ('diagnosticsWriteCheck', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(value);
+    db.prepare("DELETE FROM settings WHERE key = 'diagnosticsWriteCheck'").run();
+  });
+
+  transaction();
+
+  return {
+    linkCount: getStoredLinks().length,
+    path: getSqlitePath(),
+    writable: true,
+  };
 }
 
 export function updateStoredLinkHref(id: string, href: string) {

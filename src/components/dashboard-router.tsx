@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CheckCircle2,
   ChevronRight,
+  Database,
   ExternalLink,
   Film,
   Globe,
@@ -17,6 +18,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Server,
   Settings,
   Shield,
   Sparkles,
@@ -42,6 +44,31 @@ type MediaResponse = {
 
 type DashboardSettings = {
   defaultBaseUrl: string;
+};
+
+type DiagnosticsReport = {
+  environment: {
+    authSecretConfigured: boolean;
+    dashboardPasswordConfigured: boolean;
+    nodeEnv: string;
+    sqlitePath: string;
+  };
+  plex: {
+    baseUrl: string;
+    error: string;
+    hint: string;
+    movies: number;
+    ok: boolean;
+    shows: number;
+    tokenConfigured: boolean;
+  };
+  sqlite: {
+    error?: string;
+    linkCount: number;
+    ok: boolean;
+    path: string;
+    writable: boolean;
+  };
 };
 
 const categoryOrder = ["Media", "Downloads", "Infra", "Observability"] as const;
@@ -605,6 +632,9 @@ function MediaRail({
 function SettingsPage() {
   const { addLink, deleteLink, deletingIds, isLoadingLinks, linkError, links, savingIds, updateLink } = useAppLinks();
   const { isLoadingSettings, isSavingSettings, settings, settingsError, updateDefaultBaseUrl } = useDashboardSettings();
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsReport | null>(null);
+  const [diagnosticsError, setDiagnosticsError] = useState("");
+  const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState(true);
   const [addMode, setAddMode] = useState<"full" | "port">("port");
   const [newLinkName, setNewLinkName] = useState("");
   const [newLinkDescription, setNewLinkDescription] = useState("");
@@ -613,6 +643,52 @@ function SettingsPage() {
   const [newLinkPort, setNewLinkPort] = useState("");
   const [addError, setAddError] = useState("");
   const [isAddingLink, setIsAddingLink] = useState(false);
+
+  async function fetchDiagnosticsReport() {
+    const response = await fetch("/api/diagnostics");
+    if (!response.ok) {
+      throw new Error("Could not load diagnostics.");
+    }
+    return response.json() as Promise<DiagnosticsReport>;
+  }
+
+  async function loadDiagnostics() {
+    setIsLoadingDiagnostics(true);
+    setDiagnosticsError("");
+
+    try {
+      setDiagnostics(await fetchDiagnosticsReport());
+    } catch (error) {
+      setDiagnosticsError(error instanceof Error ? error.message : "Could not load diagnostics.");
+    } finally {
+      setIsLoadingDiagnostics(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    fetchDiagnosticsReport()
+      .then((report) => {
+        if (active) {
+          setDiagnostics(report);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setDiagnosticsError(error instanceof Error ? error.message : "Could not load diagnostics.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoadingDiagnostics(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   function urlFromPort() {
     const base = settings.defaultBaseUrl.trim().replace(/\/+$/, "");
@@ -678,6 +754,89 @@ function SettingsPage() {
             </span>
           </div>
           {settingsError ? <p className="mt-3 text-sm text-red-300">{settingsError}</p> : null}
+        </section>
+
+        <section className="rounded-lg border border-white/10 bg-zinc-950/54 p-5 backdrop-blur-xl">
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="grid h-9 w-9 place-items-center rounded-md border border-white/10 bg-black/20">
+                <Server className="h-4 w-4 text-sky-300" />
+              </div>
+              <div>
+                <h2 className="font-medium">System diagnostics</h2>
+                <p className="text-sm text-zinc-500">Checks SQLite writes and Plex reachability from this server.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadDiagnostics()}
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-white/10 px-3 text-sm text-zinc-300 transition hover:border-white/20 hover:bg-white/[0.03]"
+            >
+              <RefreshCw className={classNames("h-4 w-4", isLoadingDiagnostics && "animate-spin")} />
+              Recheck
+            </button>
+          </div>
+
+          {diagnosticsError ? <p className="mb-4 text-sm text-red-300">{diagnosticsError}</p> : null}
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="rounded-md border border-white/10 bg-black/20 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Database className="h-4 w-4 text-zinc-400" />
+                  <h3 className="text-sm font-medium text-zinc-200">SQLite</h3>
+                </div>
+                <span className={classNames("rounded-full px-2 py-1 text-xs", diagnostics?.sqlite.ok ? "bg-emerald-400/10 text-emerald-200" : "bg-red-400/10 text-red-200")}>
+                  {diagnostics?.sqlite.ok ? "OK" : "Check needed"}
+                </span>
+              </div>
+              <dl className="grid gap-2 text-sm text-zinc-500">
+                <div className="grid gap-1">
+                  <dt className="text-zinc-400">Path</dt>
+                  <dd className="break-all font-mono text-xs">{diagnostics?.sqlite.path || diagnostics?.environment.sqlitePath || "Loading..."}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Writable</dt>
+                  <dd>{diagnostics?.sqlite.writable ? "Yes" : "No"}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Links</dt>
+                  <dd>{diagnostics?.sqlite.linkCount ?? "-"}</dd>
+                </div>
+                {diagnostics?.sqlite.error ? <dd className="text-red-300">{diagnostics.sqlite.error}</dd> : null}
+              </dl>
+            </div>
+
+            <div className="rounded-md border border-white/10 bg-black/20 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Film className="h-4 w-4 text-zinc-400" />
+                  <h3 className="text-sm font-medium text-zinc-200">Plex</h3>
+                </div>
+                <span className={classNames("rounded-full px-2 py-1 text-xs", diagnostics?.plex.ok ? "bg-emerald-400/10 text-emerald-200" : "bg-red-400/10 text-red-200")}>
+                  {diagnostics?.plex.ok ? "OK" : "Check needed"}
+                </span>
+              </div>
+              <dl className="grid gap-2 text-sm text-zinc-500">
+                <div className="grid gap-1">
+                  <dt className="text-zinc-400">Base URL</dt>
+                  <dd className="break-all font-mono text-xs">{diagnostics?.plex.baseUrl || "Not set"}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Token configured</dt>
+                  <dd>{diagnostics?.plex.tokenConfigured ? "Yes" : "No"}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Recently added</dt>
+                  <dd>
+                    {diagnostics ? `${diagnostics.plex.movies} movies, ${diagnostics.plex.shows} shows` : "-"}
+                  </dd>
+                </div>
+                {diagnostics?.plex.error ? <dd className="text-red-300">{diagnostics.plex.error}</dd> : null}
+                {diagnostics?.plex.hint ? <dd className="text-sky-200">{diagnostics.plex.hint}</dd> : null}
+              </dl>
+            </div>
+          </div>
         </section>
 
         <section className="rounded-lg border border-white/10 bg-zinc-950/54 p-5 backdrop-blur-xl">

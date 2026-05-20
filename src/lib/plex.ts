@@ -182,6 +182,30 @@ async function fetchRecentlyAddedXml(baseUrl: string, token: string, type?: "1" 
   return response.text();
 }
 
+export function getPlexConfigDiagnostics() {
+  const baseUrl = process.env.PLEX_BASE_URL || "";
+  const tokenConfigured = Boolean(process.env.PLEX_TOKEN);
+  let hint = "";
+
+  try {
+    const host = baseUrl ? new URL(baseUrl).hostname : "";
+    if (host === "localhost" || host === "127.0.0.1") {
+      hint =
+        "If HomeSeek is running in Docker, localhost points at the HomeSeek container. Use http://host.docker.internal:32400 or your Plex server LAN IP instead.";
+    } else if (host === "host.docker.internal") {
+      hint = "On Linux, docker-compose.yml needs host.docker.internal mapped to host-gateway.";
+    }
+  } catch {
+    hint = "PLEX_BASE_URL must be a valid URL, for example http://192.168.1.20:32400.";
+  }
+
+  return {
+    baseUrl,
+    hint,
+    tokenConfigured,
+  };
+}
+
 export async function fetchRecentlyAddedFromPlex() {
   const baseUrl = process.env.PLEX_BASE_URL;
   const token = process.env.PLEX_TOKEN;
@@ -208,4 +232,38 @@ export async function fetchRecentlyAddedFromPlex() {
     movies: movies.length > 0 ? movies : mixed.movies,
     shows: shows.length > 0 ? shows : mixed.shows,
   };
+}
+
+export async function runPlexDiagnostics() {
+  const config = getPlexConfigDiagnostics();
+
+  if (!config.baseUrl || !config.tokenConfigured) {
+    return {
+      ...config,
+      ok: false,
+      error: "Set PLEX_BASE_URL and PLEX_TOKEN.",
+      movies: 0,
+      shows: 0,
+    };
+  }
+
+  try {
+    const media = await fetchRecentlyAddedFromPlex();
+
+    return {
+      ...config,
+      ok: true,
+      error: "",
+      movies: media.movies.length,
+      shows: media.shows.length,
+    };
+  } catch (error) {
+    return {
+      ...config,
+      ok: false,
+      error: error instanceof Error ? error.message : "Plex could not be reached.",
+      movies: 0,
+      shows: 0,
+    };
+  }
 }
