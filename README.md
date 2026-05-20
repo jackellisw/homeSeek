@@ -42,7 +42,7 @@ For Docker, `SQLITE_PATH` defaults to `/data/homeseek.sqlite` and is backed by t
 docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:4000](http://localhost:4000).
 
 When Plex is running on the Docker host, `PLEX_BASE_URL` can usually be `http://host.docker.internal:32400`. On Linux hosts that do not support `host.docker.internal`, set `PLEX_BASE_URL` to the host or bridge address your container can reach.
 
@@ -56,6 +56,7 @@ Common fixes:
 - On Linux Docker hosts, `docker-compose.yml` maps `host.docker.internal` to `host-gateway`; keep that `extra_hosts` entry.
 - If SQLite is not writable, make sure `SQLITE_PATH=/data/homeseek.sqlite` in Docker and that `/data` is mounted as a writable volume.
 - If using a bind mount instead of the named volume, the mounted host directory must be writable by container user `1001`.
+- Keep `.env` next to `docker-compose.yml`. Compose passes that file into the container via `env_file`.
 - If environment changes do not apply, recreate the container with `docker compose up -d --build --force-recreate`.
 
 ## Scripts

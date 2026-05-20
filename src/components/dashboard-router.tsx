@@ -647,7 +647,8 @@ function SettingsPage() {
   async function fetchDiagnosticsReport() {
     const response = await fetch("/api/diagnostics");
     if (!response.ok) {
-      throw new Error("Could not load diagnostics.");
+      const body = await response.text().catch(() => "");
+      throw new Error(`Diagnostics failed with HTTP ${response.status}${body ? `: ${body.slice(0, 240)}` : ""}`);
     }
     return response.json() as Promise<DiagnosticsReport>;
   }

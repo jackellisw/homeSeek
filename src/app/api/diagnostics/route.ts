@@ -44,7 +44,15 @@ export async function GET() {
     };
   }
 
-  const plex = await runPlexDiagnostics();
+  const plex = await runPlexDiagnostics().catch((error) => ({
+    baseUrl: process.env.PLEX_BASE_URL || "",
+    error: error instanceof Error ? error.message : "Plex diagnostics failed.",
+    hint: "",
+    movies: 0,
+    ok: false,
+    shows: 0,
+    tokenConfigured: Boolean(process.env.PLEX_TOKEN),
+  }));
 
   return NextResponse.json({
     environment: {
