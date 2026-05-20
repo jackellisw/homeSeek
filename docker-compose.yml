@@ -8,6 +8,7 @@ services:
       - path: ./.env
         required: false
     environment:
+      AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-false}"
       SQLITE_PATH: "/data/homeseek.sqlite"
     extra_hosts:
       - "host.docker.internal:host-gateway"

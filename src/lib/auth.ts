@@ -52,6 +52,10 @@ export function getSessionMaxAge() {
   return SESSION_TTL_SECONDS;
 }
 
+export function shouldUseSecureCookies() {
+  return process.env.AUTH_COOKIE_SECURE === "true";
+}
+
 export function isValidPassword(password: string) {
   const configuredPassword = process.env.DASHBOARD_PASSWORD || "homeseek";
   return password === configuredPassword;

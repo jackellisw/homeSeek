@@ -28,6 +28,7 @@ The default dashboard password is `homeseek`. Set `DASHBOARD_PASSWORD` in `.env.
 
 ```bash
 AUTH_SECRET="replace-with-a-long-random-string"
+AUTH_COOKIE_SECURE="false"
 DASHBOARD_PASSWORD="homeseek"
 PLEX_BASE_URL="http://localhost:32400"
 PLEX_TOKEN="your-plex-token"
@@ -52,6 +53,7 @@ Open Settings and check **System diagnostics** first. It verifies whether SQLite
 
 Common fixes:
 
+- If diagnostics says `HTTP 401` after login and you access HomeSeek over plain `http://`, set `AUTH_COOKIE_SECURE=false`, recreate the container, then log out/log in or clear the HomeSeek site cookies. Use `AUTH_COOKIE_SECURE=true` only when HomeSeek is behind HTTPS.
 - If Plex uses `http://localhost:32400` on the host, do not use that inside Docker. Use `http://host.docker.internal:32400` or the Plex server LAN IP, such as `http://192.168.1.20:32400`.
 - On Linux Docker hosts, `docker-compose.yml` maps `host.docker.internal` to `host-gateway`; keep that `extra_hosts` entry.
 - If SQLite is not writable, make sure `SQLITE_PATH=/data/homeseek.sqlite` in Docker and that `/data` is mounted as a writable volume.
